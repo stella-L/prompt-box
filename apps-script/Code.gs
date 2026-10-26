@@ -6,6 +6,12 @@ const SHEET = 'prompts';
 const COLS = ['id', 'title', 'body', 'source', 'tags', 'memo', 'fav', 'created', 'updated'];
 const HEADERS = ['id', '제목', '프롬프트', '출처', '태그', '메모', '즐겨찾기', '만든 날', '수정한 날'];
 
+// 브라우저로 URL을 열면 권한 승인 후 이 화면이 보인다
+function doGet() {
+  getSheet();
+  return ContentService.createTextOutput('✅ 프롬프트 상자 연결 준비 완료! 이 창은 닫아도 돼요.');
+}
+
 function doPost(e) {
   let res;
   try {
@@ -109,8 +115,10 @@ function findRow(sh, id) {
   return -1;
 }
 
+// 서식 있는 텍스트로 쓰면 '=', '-' 등으로 시작해도 수식으로 바뀌지 않는다
 function writeRows(sh, row, values) {
-  sh.getRange(row, 1, values.length, COLS.length).setNumberFormat('@').setValues(values);
+  const rich = values.map(r => r.map(v => SpreadsheetApp.newRichTextValue().setText(String(v)).build()));
+  sh.getRange(row, 1, values.length, COLS.length).setNumberFormat('@').setRichTextValues(rich);
 }
 
 function upsert(sh, item) {

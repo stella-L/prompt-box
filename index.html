@@ -142,6 +142,10 @@
   .sync.err { color: var(--danger); }
   .sync.err::before { background: var(--danger); }
   .sync:hover { border-color: var(--line-strong); }
+  .link-box { margin-top: 18px; padding: 12px 14px; border-radius: 10px; background: var(--surface-2);
+    display: flex; gap: 12px; align-items: center; font-size: 14px; }
+  .link-box > div { flex: 1; }
+  .link-box .hint { margin-top: 2px; }
   .steps { font-size: 13.5px; color: var(--text-2); line-height: 1.7; margin: 4px 0 0; padding-left: 18px; }
   .steps a { color: var(--accent); }
 
@@ -251,6 +255,13 @@
       <div class="field"><label>웹 앱 URL</label><input id="cUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>
       <div class="field"><label>토큰</label><input id="cToken" type="password" placeholder="Code.gs의 TOKEN 값"></div>
       <div class="hint">URL과 토큰은 이 브라우저에만 저장돼요. 다른 기기에서도 같은 값을 한 번 입력하면 돼요.</div>
+      <div class="link-box" id="linkBox">
+        <div>
+          <b>연결 링크</b>
+          <div class="hint">새 기기·브라우저에서 이 링크를 열면 바로 연결돼요. 토큰이 들어 있으니 나만 보관하세요.</div>
+        </div>
+        <button class="btn btn-line" id="copyLinkBtn">링크 복사</button>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-danger" id="disconnectBtn">연결 해제</button>
@@ -551,6 +562,7 @@ function openConn() {
   $('cUrl').value = remote?.url ?? '';
   $('cToken').value = remote?.token ?? '';
   $('disconnectBtn').style.visibility = remote ? 'visible' : 'hidden';
+  $('linkBox').style.display = remote ? 'flex' : 'none';
   $('connModal').classList.add('show');
   $('cUrl').focus();
 }
@@ -558,10 +570,10 @@ function closeConn() { $('connModal').classList.remove('show'); }
 $('sync').onclick = openConn;
 $('connectBtn').onclick = openConn;
 $('connCancel').onclick = closeConn;
-$('connSave').onclick = async () => {
-  const conn = { url: $('cUrl').value.trim(), token: $('cToken').value.trim() };
+async function connect(conn) {
   if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(conn.url)) { toast('URL은 /exec로 끝나는 웹 앱 주소여야 해요'); return; }
   const btn = $('connSave'); btn.disabled = true; btn.textContent = '확인 중…';
+  setSync('busy', '연결 중…');
   try {
     const { items } = await api('list', {}, conn);
     if (!items.length && prompts.length &&
@@ -571,15 +583,32 @@ $('connSave').onclick = async () => {
       prompts = items;
     }
     remote = conn;
-    localStorage.setItem(REMOTE_KEY, JSON.stringify(conn));
+    try { localStorage.setItem(REMOTE_KEY, JSON.stringify(conn)); } catch {}
     version++; saveLocal(); render(); idleSync(); closeConn();
     toast('구글 시트에 연결했어요');
   } catch (e) {
+    idleSync();
     toast(e.message === '토큰이 맞지 않아요' ? e.message : '연결하지 못했어요. URL과 배포 설정을 확인해 주세요');
   } finally {
     btn.disabled = false; btn.textContent = '연결';
   }
+}
+$('connSave').onclick = () => connect({ url: $('cUrl').value.trim(), token: $('cToken').value.trim() });
+
+// 연결 링크: 주소 뒤 #connect=... 에 URL·토큰을 담는다 (# 뒤는 서버로 전송되지 않음)
+$('copyLinkBtn').onclick = () => {
+  const code = btoa(JSON.stringify(remote));
+  copyText(location.origin + location.pathname + '#connect=' + encodeURIComponent(code));
 };
+function connectFromLink() {
+  const m = location.hash.match(/^#connect=(.+)$/);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search); // 주소창에서 토큰 지우기
+  let conn;
+  try { conn = JSON.parse(atob(decodeURIComponent(m[1]))); } catch { toast('연결 링크가 올바르지 않아요'); return false; }
+  connect(conn);
+  return true;
+}
 $('disconnectBtn').onclick = () => {
   if (!confirm('연결을 해제할까요? 시트의 데이터는 그대로 남아요.')) return;
   remote = null; localStorage.removeItem(REMOTE_KEY);
@@ -592,7 +621,7 @@ setInterval(() => { if (!document.hidden) pull(); }, 60000);
 
 render();
 idleSync();
-pull();
+if (!connectFromLink()) pull();
 </script>
 </body>
 </html>

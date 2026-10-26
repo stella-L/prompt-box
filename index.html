@@ -134,6 +134,17 @@
     font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; max-height: 220px; overflow-y: auto; color: var(--text-2); overflow-wrap: anywhere; }
   .preview-label { font-size: 12px; color: var(--muted); margin-top: 16px; }
 
+  .sync { font-size: 12.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
+  .sync::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .sync.ok::before { background: var(--ok); }
+  .sync.busy::before { background: var(--star); }
+  .sync.err { color: var(--danger); }
+  .sync.err::before { background: var(--danger); }
+  .sync:hover { border-color: var(--line-strong); }
+  .steps { font-size: 13.5px; color: var(--text-2); line-height: 1.7; margin: 4px 0 0; padding-left: 18px; }
+  .steps a { color: var(--accent); }
+
   .toast { position: fixed; bottom: 28px; left: 50%; transform: translate(-50%, 12px); background: var(--ink);
     color: var(--ink-text); padding: 10px 18px; border-radius: 999px; font-size: 14px; opacity: 0;
     transition: .2s; pointer-events: none; z-index: 20; }
@@ -148,6 +159,7 @@
     .grid { grid-template-columns: 1fr; }
     .two { grid-template-columns: 1fr; gap: 0; }
     .btn-new-label { display: none; }
+    .sync-label { display: none; }
   }
 </style>
 </head>
@@ -155,6 +167,7 @@
 <div class="top">
   <div class="top-inner">
     <div class="logo">📦 프롬프트 상자</div>
+    <button class="sync" id="sync" title="저장 위치 설정"><span class="sync-label" id="syncLabel"></span></button>
     <div class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="search" placeholder="제목, 내용, 출처, 메모로 검색">
@@ -165,6 +178,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
       </button>
       <div class="menu-pop" id="menuPop">
+        <button id="connectBtn">구글 시트 연결</button>
         <button id="exportBtn">백업 파일 저장</button>
         <button id="importBtn">백업 불러오기</button>
       </div>
@@ -225,10 +239,33 @@
   </div>
 </div>
 
+<!-- 구글 시트 연결 -->
+<div class="modal-bg" id="connModal">
+  <div class="modal">
+    <div class="modal-head">구글 시트 연결</div>
+    <div class="modal-body">
+      <ol class="steps">
+        <li>구글 시트에 Apps Script를 붙여서 웹 앱으로 배포해요 (<a href="https://github.com/stella-L/prompt-box#구글-시트-연결" target="_blank" rel="noopener">설정 방법</a>)</li>
+        <li>배포 URL과 스크립트에 넣은 토큰을 아래에 입력해요</li>
+      </ol>
+      <div class="field"><label>웹 앱 URL</label><input id="cUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>
+      <div class="field"><label>토큰</label><input id="cToken" type="password" placeholder="Code.gs의 TOKEN 값"></div>
+      <div class="hint">URL과 토큰은 이 브라우저에만 저장돼요. 다른 기기에서도 같은 값을 한 번 입력하면 돼요.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="disconnectBtn">연결 해제</button>
+      <div class="spacer"></div>
+      <button class="btn btn-line" id="connCancel">취소</button>
+      <button class="btn btn-ink" id="connSave">연결</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 const KEY = 'prompt-box-v1';
+const REMOTE_KEY = 'prompt-box-remote';
 const $ = id => document.getElementById(id);
 const VAR_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
@@ -252,6 +289,9 @@ let prompts = load();
 let activeTag = null;
 let editingId = null;
 let fillTarget = null;
+let remote = loadRemote();
+let pending = 0;   // 시트로 보내는 중인 요청 수
+let version = 0;   // 로컬 변경 횟수 — 불러오는 사이 바뀌면 결과를 버린다
 
 function uid() { return crypto.randomUUID?.() ?? String(Date.now() + Math.random()); }
 function load() {
@@ -262,9 +302,59 @@ function load() {
   const now = Date.now();
   return SAMPLES.map((s, i) => ({ id: uid(), fav: false, created: now - i, updated: now - i, ...s }));
 }
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(prompts)); }
-  catch { toast('저장 실패 — 백업을 꼭 해두세요'); }
+function saveLocal() {
+  try { localStorage.setItem(KEY, JSON.stringify(prompts)); } catch {}
+}
+function loadRemote() {
+  try { return JSON.parse(localStorage.getItem(REMOTE_KEY)); } catch { return null; }
+}
+
+// 구글 시트
+function setSync(state, label) {
+  $('sync').className = 'sync ' + state;
+  $('syncLabel').textContent = label;
+}
+function idleSync() { remote ? setSync('ok', '구글 시트') : setSync('', '이 브라우저'); }
+
+async function api(action, data = {}, conn = remote) {
+  const res = await fetch(conn.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // preflight 없이 Apps Script로 보내기
+    body: JSON.stringify({ token: conn.token, action, ...data }),
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || '요청 실패');
+  return json;
+}
+
+async function push(action, data) {
+  if (!remote) return;
+  pending++; setSync('busy', '저장 중…');
+  try {
+    await api(action, data);
+    if (--pending === 0) idleSync();
+  } catch {
+    pending--;
+    setSync('err', '저장 실패');
+    toast('시트에 저장하지 못했어요');
+  }
+}
+
+async function pull() {
+  if (!remote || pending) return;
+  const v = version;
+  try {
+    const { items } = await api('list');
+    if (v !== version || pending) return;
+    prompts = items; saveLocal(); render(); idleSync();
+  } catch {
+    setSync('err', '연결 오류');
+  }
+}
+
+// 바꾼 내용을 로컬에 저장하고 시트로 보낸다
+function commit(action, data) {
+  version++; saveLocal(); render(); push(action, data);
 }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -366,14 +456,15 @@ $('saveBtn').onclick = () => {
     updated: Date.now(),
   };
   if (!data.body.trim()) { toast('프롬프트 내용을 입력해 주세요'); $('fBody').focus(); return; }
-  if (editingId) Object.assign(prompts.find(p => p.id === editingId), data);
-  else prompts.push({ id: uid(), fav: false, created: Date.now(), ...data });
-  save(); closeEdit(); render(); toast('저장했어요');
+  let item = editingId && prompts.find(p => p.id === editingId);
+  if (item) Object.assign(item, data);
+  else prompts.push(item = { id: editingId || uid(), fav: false, created: Date.now(), ...data });
+  closeEdit(); commit('save', { item }); toast('저장했어요');
 };
 $('deleteBtn').onclick = () => {
   if (!confirm('이 프롬프트를 삭제할까요?')) return;
   prompts = prompts.filter(p => p.id !== editingId);
-  save(); closeEdit(); render(); toast('삭제했어요');
+  closeEdit(); commit('delete', { id: editingId }); toast('삭제했어요');
 };
 $('cancelBtn').onclick = closeEdit;
 $('newBtn').onclick = () => openEdit(null);
@@ -409,7 +500,7 @@ $('list').onclick = e => {
     const vars = varsOf(p.body);
     vars.length ? openFill(p, vars) : copyText(p.body, el);
   } else if (act === 'edit') openEdit(p);
-  else if (act === 'fav') { p.fav = !p.fav; save(); render(); }
+  else if (act === 'fav') { p.fav = !p.fav; p.updated = Date.now(); commit('save', { item: p }); }
   else if (act === 'toggle') el.classList.toggle('open');
 };
 $('tags').onclick = e => {
@@ -427,7 +518,7 @@ document.querySelectorAll('.modal-bg').forEach(bg =>
   bg.addEventListener('mousedown', e => { if (e.target === bg) bg.classList.remove('show'); }));
 document.addEventListener('keydown', e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-  if (e.key === 'Escape') { closeEdit(); closeFill(); if (typing) document.activeElement.blur(); }
+  if (e.key === 'Escape') { closeEdit(); closeFill(); closeConn(); if (typing) document.activeElement.blur(); }
   if (e.key === '/' && !typing) { e.preventDefault(); $('search').focus(); }
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && $('editModal').classList.contains('show')) $('saveBtn').click();
 });
@@ -449,13 +540,59 @@ $('importFile').onchange = async e => {
     const ids = new Set(prompts.map(p => p.id));
     const added = data.filter(p => p && p.id && p.body && !ids.has(p.id))
       .map(p => ({ fav: false, tags: [], source: '', memo: '', title: '', updated: Date.now(), ...p }));
-    prompts.push(...added); save(); render();
+    prompts.push(...added); commit('bulk', { items: added });
     toast(`${added.length}개 불러왔어요`);
   } catch { toast('파일을 읽을 수 없어요'); }
   e.target.value = '';
 };
 
+// 구글 시트 연결 설정
+function openConn() {
+  $('cUrl').value = remote?.url ?? '';
+  $('cToken').value = remote?.token ?? '';
+  $('disconnectBtn').style.visibility = remote ? 'visible' : 'hidden';
+  $('connModal').classList.add('show');
+  $('cUrl').focus();
+}
+function closeConn() { $('connModal').classList.remove('show'); }
+$('sync').onclick = openConn;
+$('connectBtn').onclick = openConn;
+$('connCancel').onclick = closeConn;
+$('connSave').onclick = async () => {
+  const conn = { url: $('cUrl').value.trim(), token: $('cToken').value.trim() };
+  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(conn.url)) { toast('URL은 /exec로 끝나는 웹 앱 주소여야 해요'); return; }
+  const btn = $('connSave'); btn.disabled = true; btn.textContent = '확인 중…';
+  try {
+    const { items } = await api('list', {}, conn);
+    if (!items.length && prompts.length &&
+        confirm(`시트가 비어 있어요. 이 브라우저에 있는 ${prompts.length}개를 시트로 올릴까요?`)) {
+      await api('bulk', { items: prompts }, conn);
+    } else {
+      prompts = items;
+    }
+    remote = conn;
+    localStorage.setItem(REMOTE_KEY, JSON.stringify(conn));
+    version++; saveLocal(); render(); idleSync(); closeConn();
+    toast('구글 시트에 연결했어요');
+  } catch (e) {
+    toast(e.message === '토큰이 맞지 않아요' ? e.message : '연결하지 못했어요. URL과 배포 설정을 확인해 주세요');
+  } finally {
+    btn.disabled = false; btn.textContent = '연결';
+  }
+};
+$('disconnectBtn').onclick = () => {
+  if (!confirm('연결을 해제할까요? 시트의 데이터는 그대로 남아요.')) return;
+  remote = null; localStorage.removeItem(REMOTE_KEY);
+  idleSync(); closeConn(); toast('연결을 해제했어요');
+};
+
+// 다른 기기에서 바꾼 내용 반영: 탭으로 돌아올 때 + 1분마다
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
+setInterval(() => { if (!document.hidden) pull(); }, 60000);
+
 render();
+idleSync();
+pull();
 </script>
 </body>
 </html>

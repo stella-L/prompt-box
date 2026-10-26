@@ -64,6 +64,14 @@
 
   /* 본문 */
   .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 20px 80px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  .tab { padding: 10px 14px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent;
+    margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; transition: color .15s; }
+  .tab:hover { color: var(--text-2); }
+  .tab.on { color: var(--text); border-color: var(--text); }
+  .tab .n { font-size: 12px; font-weight: 500; background: var(--surface-2); color: var(--text-2);
+    padding: 1px 7px; border-radius: 999px; }
+
   .tags { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 18px; scrollbar-width: none; }
   .tags::-webkit-scrollbar { display: none; }
   .chip { font-size: 13.5px; padding: 6px 12px; border-radius: 999px; color: var(--text-2);
@@ -102,6 +110,22 @@
     font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; transition: .15s; }
   .copy:hover { opacity: .88; }
   .copy.done { background: var(--ok); color: #fff; }
+
+  /* 링크 카드 */
+  .link-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px 0 16px; }
+  .fav-ico { width: 36px; height: 36px; border-radius: 9px; background: var(--surface-2); flex-shrink: 0;
+    display: grid; place-items: center; font-weight: 700; color: var(--text-2); overflow: hidden; }
+  .fav-ico img { width: 20px; height: 20px; }
+  .link-main { flex: 1; min-width: 0; }
+  .link-title { font-weight: 600; font-size: 15.5px; line-height: 1.4; color: var(--text); text-decoration: none;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .link-title:hover { text-decoration: underline; }
+  .link-url { font-size: 12.5px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copy.line { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
+  .copy.line:hover { background: var(--surface-2); opacity: 1; }
+  .copy.line.done { background: var(--ok); color: #fff; border-color: var(--ok); }
+  .copy.icon-only { padding: 0 10px; }
+  a.copy { text-decoration: none; }
 
   .empty { text-align: center; color: var(--text-2); padding: 80px 20px; }
   .empty b { display: block; font-size: 17px; color: var(--text); margin-bottom: 6px; }
@@ -189,13 +213,17 @@
     </div>
     <button class="btn btn-ink" id="newBtn">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
-      <span class="btn-new-label">새 프롬프트</span>
+      <span class="btn-new-label" id="newLabel">새 프롬프트</span>
     </button>
     <input type="file" id="importFile" accept=".json" hidden>
   </div>
 </div>
 
 <div class="wrap">
+  <div class="tabs" id="tabs">
+    <button class="tab" data-tab="prompts">프롬프트<span class="n" id="nPrompts"></span></button>
+    <button class="tab" data-tab="links">링크<span class="n" id="nLinks"></span></button>
+  </div>
   <div class="tags" id="tags"></div>
   <div id="list"></div>
 </div>
@@ -222,6 +250,25 @@
       <div class="spacer"></div>
       <button class="btn btn-line" id="cancelBtn">취소</button>
       <button class="btn btn-ink" id="saveBtn">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 링크 작성/수정 -->
+<div class="modal-bg" id="linkModal">
+  <div class="modal">
+    <div class="modal-head" id="linkTitle">새 링크</div>
+    <div class="modal-body">
+      <div class="field"><label>링크</label><input id="lUrl" type="url" placeholder="https://..."></div>
+      <div class="field"><label>제목</label><input id="lTitle" placeholder="비워두면 사이트 주소로 저장돼요"></div>
+      <div class="field"><label>태그</label><input id="lTags" placeholder="AI툴, 참고자료"></div>
+      <div class="field"><label>메모</label><textarea id="lMemo" class="memo-ta" placeholder="왜 저장했는지, 어디에 쓸지"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="lDeleteBtn">삭제</button>
+      <div class="spacer"></div>
+      <button class="btn btn-line" id="lCancelBtn">취소</button>
+      <button class="btn btn-ink" id="lSaveBtn">저장</button>
     </div>
   </div>
 </div>
@@ -275,10 +322,12 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const KEY = 'prompt-box-v1';
+const KEYS = { prompts: 'prompt-box-v1', links: 'prompt-box-links-v1' };
+const TAB_KEY = 'prompt-box-tab';
 const REMOTE_KEY = 'prompt-box-remote';
 const $ = id => document.getElementById(id);
 const VAR_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
+const NAME = { prompts: '프롬프트', links: '링크' };
 
 const ICON = {
   star: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
@@ -288,6 +337,7 @@ const ICON = {
   check: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="m5 12 5 5 9-10"/></svg>',
   link: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
   memo: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h14v16H5zM9 9h6M9 13h6M9 17h3"/></svg>',
+  open: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
 };
 
 const SAMPLES = [
@@ -296,7 +346,8 @@ const SAMPLES = [
   { title: '문장 다듬기', body: '아래 글을 의미는 그대로 두고 더 자연스럽게 다듬어줘. 바꾼 부분은 굵게 표시해줘.\n\n', source: '', tags: ['글쓰기'], memo: 'Claude에서 잘 됨' },
 ];
 
-let prompts = load();
+let data = { prompts: load('prompts'), links: load('links') };
+let tab = (() => { try { return localStorage.getItem(TAB_KEY) === 'links' ? 'links' : 'prompts'; } catch { return 'prompts'; } })();
 let activeTag = null;
 let editingId = null;
 let fillTarget = null;
@@ -305,16 +356,17 @@ let pending = 0;   // 시트로 보내는 중인 요청 수
 let version = 0;   // 로컬 변경 횟수 — 불러오는 사이 바뀌면 결과를 버린다
 
 function uid() { return crypto.randomUUID?.() ?? String(Date.now() + Math.random()); }
-function load() {
+function load(kind) {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEYS[kind]);
     if (raw) return JSON.parse(raw);
   } catch {}
+  if (kind === 'links') return [];
   const now = Date.now();
   return SAMPLES.map((s, i) => ({ id: uid(), fav: false, created: now - i, updated: now - i, ...s }));
 }
 function saveLocal() {
-  try { localStorage.setItem(KEY, JSON.stringify(prompts)); } catch {}
+  try { for (const k in KEYS) localStorage.setItem(KEYS[k], JSON.stringify(data[k])); } catch {}
 }
 function loadRemote() {
   try { return JSON.parse(localStorage.getItem(REMOTE_KEY)); } catch { return null; }
@@ -327,22 +379,22 @@ function setSync(state, label) {
 }
 function idleSync() { remote ? setSync('ok', '구글 시트') : setSync('', '이 브라우저'); }
 
-async function api(action, data = {}, conn = remote) {
+async function api(action, payload = {}, conn = remote) {
   const res = await fetch(conn.url, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // preflight 없이 Apps Script로 보내기
-    body: JSON.stringify({ token: conn.token, action, ...data }),
+    body: JSON.stringify({ token: conn.token, action, ...payload }),
   });
   const json = await res.json();
   if (!json.ok) throw new Error(json.error || '요청 실패');
   return json;
 }
 
-async function push(action, data) {
+async function push(action, payload) {
   if (!remote) return;
   pending++; setSync('busy', '저장 중…');
   try {
-    await api(action, data);
+    await api(action, payload);
     if (--pending === 0) idleSync();
   } catch {
     pending--;
@@ -355,79 +407,131 @@ async function pull() {
   if (!remote || pending) return;
   const v = version;
   try {
-    const { items } = await api('list');
+    const { prompts, links } = await api('all');
     if (v !== version || pending) return;
-    prompts = items; saveLocal(); render(); idleSync();
+    data = { prompts, links }; saveLocal(); render(); idleSync();
   } catch {
     setSync('err', '연결 오류');
   }
 }
 
 // 바꾼 내용을 로컬에 저장하고 시트로 보낸다
-function commit(action, data) {
-  version++; saveLocal(); render(); push(action, data);
+function commit(kind, action, payload) {
+  version++; saveLocal(); render(); push(action, { kind, ...payload });
 }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function varsOf(text) { return [...new Set([...text.matchAll(VAR_RE)].map(m => m[1]))]; }
+function parseTags(s) { return [...new Set(s.split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean))]; }
+function hostOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } }
+function prettyUrl(url) { return url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''); }
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1600);
 }
 
+function promptCard(p) {
+  const body = esc(p.body.trim()).replace(/\{\{\s*([^{}]+?)\s*\}\}/g, '<span class="var">$1</span>');
+  let src = '';
+  if (p.source) {
+    src = /^https?:\/\//.test(p.source)
+      ? `<div class="row">${ICON.link}<a href="${esc(p.source)}" target="_blank" rel="noopener">${esc(prettyUrl(p.source))}</a></div>`
+      : `<div class="row">${ICON.link}<span>${esc(p.source)}</span></div>`;
+  }
+  const memo = p.memo ? `<div class="row">${ICON.memo}<span>${esc(p.memo)}</span></div>` : '';
+  return `<div class="card" data-id="${p.id}">
+    <div class="card-head">
+      <div class="card-title">${esc(p.title) || '제목 없음'}</div>
+      <button class="icon-btn ${p.fav ? 'fav' : ''}" data-act="fav" title="즐겨찾기">${p.fav ? ICON.starOn : ICON.star}</button>
+      <button class="icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+    </div>
+    <div class="body" data-act="toggle" title="눌러서 전체 보기">${body}</div>
+    ${src || memo ? `<div class="info">${src}${memo}</div>` : ''}
+    <div class="card-foot">
+      <div class="card-tags">${p.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
+      <button class="copy" data-act="copy">${ICON.copy}<span>복사</span></button>
+    </div>
+  </div>`;
+}
+
+function linkCard(l) {
+  const host = hostOf(l.url);
+  const memo = l.memo ? `<div class="info"><div class="row">${ICON.memo}<span>${esc(l.memo)}</span></div></div>` : '';
+  return `<div class="card" data-id="${l.id}">
+    <div class="link-head">
+      <div class="fav-ico">${esc(host.charAt(0).toUpperCase())}</div>
+      <div class="link-main">
+        <a class="link-title" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title) || esc(host)}</a>
+        <div class="link-url">${esc(prettyUrl(l.url))}</div>
+      </div>
+      <button class="icon-btn ${l.fav ? 'fav' : ''}" data-act="fav" title="즐겨찾기">${l.fav ? ICON.starOn : ICON.star}</button>
+      <button class="icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+    </div>
+    ${memo}
+    <div class="card-foot">
+      <div class="card-tags">${l.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
+      <button class="copy line icon-only" data-act="copy" title="링크 복사">${ICON.copy}</button>
+      <a class="copy" href="${esc(l.url)}" target="_blank" rel="noopener">${ICON.open}<span>열기</span></a>
+    </div>
+  </div>`;
+}
+
 function render() {
+  const list = data[tab];
   const q = $('search').value.trim().toLowerCase();
   const counts = {};
-  prompts.forEach(p => p.tags.forEach(t => counts[t] = (counts[t] || 0) + 1));
+  list.forEach(p => p.tags.forEach(t => counts[t] = (counts[t] || 0) + 1));
   const allTags = Object.keys(counts).sort((a, b) => a.localeCompare(b, 'ko'));
-  if (activeTag && !counts[activeTag]) activeTag = null;
-  const favCount = prompts.filter(p => p.fav).length;
+  if (activeTag && activeTag !== '★' && !counts[activeTag]) activeTag = null;
+  const favCount = list.filter(p => p.fav).length;
+  if (activeTag === '★' && !favCount) activeTag = null;
 
-  $('tags').innerHTML = prompts.length
-    ? `<button class="chip ${activeTag ? '' : 'on'}" data-tag="">전체<span class="n">${prompts.length}</span></button>` +
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  $('nPrompts').textContent = data.prompts.length;
+  $('nLinks').textContent = data.links.length;
+  $('newLabel').textContent = '새 ' + NAME[tab];
+  $('search').placeholder = tab === 'links' ? '제목, 주소, 메모로 검색' : '제목, 내용, 출처, 메모로 검색';
+
+  $('tags').innerHTML = list.length
+    ? `<button class="chip ${activeTag ? '' : 'on'}" data-tag="">전체<span class="n">${list.length}</span></button>` +
       (favCount ? `<button class="chip ${activeTag === '★' ? 'on' : ''}" data-tag="★">★ 즐겨찾기<span class="n">${favCount}</span></button>` : '') +
       allTags.map(t => `<button class="chip ${t === activeTag ? 'on' : ''}" data-tag="${esc(t)}">#${esc(t)}<span class="n">${counts[t]}</span></button>`).join('')
     : '';
 
-  const items = prompts
+  const items = list
     .filter(p => !activeTag || (activeTag === '★' ? p.fav : p.tags.includes(activeTag)))
-    .filter(p => !q || [p.title, p.body, p.source, p.memo, p.tags.join(' ')].join('\n').toLowerCase().includes(q))
+    .filter(p => !q || [p.title, p.body, p.url, p.source, p.memo, p.tags.join(' ')].join('\n').toLowerCase().includes(q))
     .sort((a, b) => (b.fav - a.fav) || (b.updated - a.updated));
 
-  if (!prompts.length) {
-    $('list').innerHTML = `<div class="empty"><b>아직 저장된 프롬프트가 없어요</b>오른쪽 위 <b style="display:inline">+</b> 버튼으로 첫 프롬프트를 추가해 보세요</div>`;
+  if (!list.length) {
+    $('list').innerHTML = tab === 'links'
+      ? `<div class="empty"><b>아직 저장된 링크가 없어요</b>오른쪽 위 <b style="display:inline">+</b> 버튼을 누르거나, 링크를 복사해서 이 화면에 붙여넣기(⌘V) 해보세요</div>`
+      : `<div class="empty"><b>아직 저장된 프롬프트가 없어요</b>오른쪽 위 <b style="display:inline">+</b> 버튼으로 첫 프롬프트를 추가해 보세요</div>`;
     return;
   }
   if (!items.length) {
     $('list').innerHTML = `<div class="empty"><b>검색 결과가 없어요</b>다른 단어로 찾아보세요</div>`;
     return;
   }
+  $('list').innerHTML = '<div class="grid">' + items.map(tab === 'links' ? linkCard : promptCard).join('') + '</div>';
 
-  $('list').innerHTML = '<div class="grid">' + items.map(p => {
-    const body = esc(p.body.trim()).replace(/\{\{\s*([^{}]+?)\s*\}\}/g, '<span class="var">$1</span>');
-    let src = '';
-    if (p.source) {
-      src = /^https?:\/\//.test(p.source)
-        ? `<div class="row">${ICON.link}<a href="${esc(p.source)}" target="_blank" rel="noopener">${esc(p.source.replace(/^https?:\/\/(www\.)?/, ''))}</a></div>`
-        : `<div class="row">${ICON.link}<span>${esc(p.source)}</span></div>`;
-    }
-    const memo = p.memo ? `<div class="row">${ICON.memo}<span>${esc(p.memo)}</span></div>` : '';
-    return `<div class="card" data-id="${p.id}">
-      <div class="card-head">
-        <div class="card-title">${esc(p.title) || '제목 없음'}</div>
-        <button class="icon-btn ${p.fav ? 'fav' : ''}" data-act="fav" title="즐겨찾기">${p.fav ? ICON.starOn : ICON.star}</button>
-        <button class="icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
-      </div>
-      <div class="body" data-act="toggle" title="눌러서 전체 보기">${body}</div>
-      ${src || memo ? `<div class="info">${src}${memo}</div>` : ''}
-      <div class="card-foot">
-        <div class="card-tags">${p.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>
-        <button class="copy" data-act="copy">${ICON.copy}<span>복사</span></button>
-      </div>
-    </div>`;
-  }).join('') + '</div>';
+  // 사이트 아이콘: 불러오면 첫 글자 대신 보여준다
+  $('list').querySelectorAll('.fav-ico').forEach(box => {
+    const url = data.links.find(l => l.id === box.closest('.card').dataset.id)?.url;
+    const img = new Image();
+    img.onload = () => { if (img.naturalWidth > 16) box.replaceChildren(img); };
+    img.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostOf(url))}&sz=64`;
+  });
 }
+
+function switchTab(t) {
+  if (t === tab) return;
+  tab = t; activeTag = null; $('search').value = '';
+  try { localStorage.setItem(TAB_KEY, t); } catch {}
+  render();
+}
+$('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) switchTab(b.dataset.tab); };
 
 async function copyText(text, btn) {
   try { await navigator.clipboard.writeText(text); }
@@ -437,19 +541,22 @@ async function copyText(text, btn) {
     document.execCommand('copy'); ta.remove();
   }
   if (btn) {
-    btn.classList.add('done'); btn.innerHTML = `${ICON.check}<span>복사됨</span>`;
-    setTimeout(() => { btn.classList.remove('done'); btn.innerHTML = `${ICON.copy}<span>복사</span>`; }, 1400);
+    const before = btn.innerHTML;
+    btn.classList.add('done');
+    btn.innerHTML = btn.classList.contains('icon-only') ? ICON.check : `${ICON.check}<span>복사됨</span>`;
+    setTimeout(() => { btn.classList.remove('done'); btn.innerHTML = before; }, 1400);
   } else toast('복사했어요');
 }
+function defaultTag() { return activeTag && activeTag !== '★' ? activeTag : ''; }
 
-// 작성/수정
+// 프롬프트 작성/수정
 function openEdit(p) {
   editingId = p?.id ?? null;
   $('editTitle').textContent = p ? '프롬프트 수정' : '새 프롬프트';
   $('fTitle').value = p?.title ?? '';
   $('fBody').value = p?.body ?? '';
   $('fSource').value = p?.source ?? '';
-  $('fTags').value = p ? p.tags.join(', ') : (activeTag && activeTag !== '★' ? activeTag : '');
+  $('fTags').value = p ? p.tags.join(', ') : defaultTag();
   $('fMemo').value = p?.memo ?? '';
   $('deleteBtn').style.visibility = p ? 'visible' : 'hidden';
   $('editModal').classList.add('show');
@@ -458,27 +565,81 @@ function openEdit(p) {
 function closeEdit() { $('editModal').classList.remove('show'); }
 
 $('saveBtn').onclick = () => {
-  const data = {
+  const d = {
     title: $('fTitle').value.trim(),
     body: $('fBody').value,
     source: $('fSource').value.trim(),
-    tags: [...new Set($('fTags').value.split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean))],
+    tags: parseTags($('fTags').value),
     memo: $('fMemo').value.trim(),
     updated: Date.now(),
   };
-  if (!data.body.trim()) { toast('프롬프트 내용을 입력해 주세요'); $('fBody').focus(); return; }
-  let item = editingId && prompts.find(p => p.id === editingId);
-  if (item) Object.assign(item, data);
-  else prompts.push(item = { id: editingId || uid(), fav: false, created: Date.now(), ...data });
-  closeEdit(); commit('save', { item }); toast('저장했어요');
+  if (!d.body.trim()) { toast('프롬프트 내용을 입력해 주세요'); $('fBody').focus(); return; }
+  let item = editingId && data.prompts.find(p => p.id === editingId);
+  if (item) Object.assign(item, d);
+  else data.prompts.push(item = { id: editingId || uid(), fav: false, created: Date.now(), ...d });
+  closeEdit(); commit('prompts', 'save', { item }); toast('저장했어요');
 };
 $('deleteBtn').onclick = () => {
   if (!confirm('이 프롬프트를 삭제할까요?')) return;
-  prompts = prompts.filter(p => p.id !== editingId);
-  closeEdit(); commit('delete', { id: editingId }); toast('삭제했어요');
+  data.prompts = data.prompts.filter(p => p.id !== editingId);
+  closeEdit(); commit('prompts', 'delete', { id: editingId }); toast('삭제했어요');
 };
 $('cancelBtn').onclick = closeEdit;
-$('newBtn').onclick = () => openEdit(null);
+
+// 링크 작성/수정
+function normalizeUrl(s) {
+  s = s.trim();
+  if (s && !/^[a-z][a-z0-9+.-]*:/i.test(s)) s = 'https://' + s;
+  return s;
+}
+function openLink(l, url = '') {
+  editingId = l?.id ?? null;
+  $('linkTitle').textContent = l ? '링크 수정' : '새 링크';
+  $('lUrl').value = l?.url ?? url;
+  $('lTitle').value = l?.title ?? '';
+  $('lTags').value = l ? l.tags.join(', ') : defaultTag();
+  $('lMemo').value = l?.memo ?? '';
+  $('lDeleteBtn').style.visibility = l ? 'visible' : 'hidden';
+  $('linkModal').classList.add('show');
+  (url ? $('lTitle') : $('lUrl')).focus();
+}
+function closeLink() { $('linkModal').classList.remove('show'); }
+
+$('lSaveBtn').onclick = () => {
+  const url = normalizeUrl($('lUrl').value);
+  try { new URL(url); } catch { toast('링크 주소를 확인해 주세요'); $('lUrl').focus(); return; }
+  const d = {
+    url,
+    title: $('lTitle').value.trim(),
+    tags: parseTags($('lTags').value),
+    memo: $('lMemo').value.trim(),
+    updated: Date.now(),
+  };
+  const dup = data.links.find(l => l.url === url && l.id !== editingId);
+  if (dup && !confirm(`이미 저장된 링크예요 (${dup.title || hostOf(url)}). 그래도 저장할까요?`)) return;
+  let item = editingId && data.links.find(l => l.id === editingId);
+  if (item) Object.assign(item, d);
+  else data.links.push(item = { id: editingId || uid(), fav: false, created: Date.now(), ...d });
+  closeLink(); commit('links', 'save', { item }); toast('저장했어요');
+};
+$('lDeleteBtn').onclick = () => {
+  if (!confirm('이 링크를 삭제할까요?')) return;
+  data.links = data.links.filter(l => l.id !== editingId);
+  closeLink(); commit('links', 'delete', { id: editingId }); toast('삭제했어요');
+};
+$('lCancelBtn').onclick = closeLink;
+$('newBtn').onclick = () => tab === 'links' ? openLink(null) : openEdit(null);
+
+// 링크 탭에서 주소를 붙여넣으면 바로 새 링크 창을 연다
+document.addEventListener('paste', e => {
+  if (tab !== 'links' || document.querySelector('.modal-bg.show')) return;
+  const el = document.activeElement;
+  if (/INPUT|TEXTAREA/.test(el.tagName) && !el.closest('.modal-bg')) return; // 검색창 등에 입력 중
+  const text = (e.clipboardData?.getData('text') || '').trim();
+  if (!/^(https?:\/\/\S+|[\w-]+(\.[\w-]+)*\.[a-z]{2,}(\/\S*)?)$/i.test(text)) return;
+  e.preventDefault();
+  openLink(null, normalizeUrl(text));
+});
 
 // 빈칸 채우기
 function fillResult() {
@@ -505,13 +666,15 @@ $('fillFields').addEventListener('keydown', e => {
 // 카드 동작
 $('list').onclick = e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
-  const p = prompts.find(x => x.id === el.closest('.card').dataset.id);
+  const kind = tab;
+  const p = data[kind].find(x => x.id === el.closest('.card').dataset.id);
   const act = el.dataset.act;
   if (act === 'copy') {
+    if (kind === 'links') return copyText(p.url, el);
     const vars = varsOf(p.body);
     vars.length ? openFill(p, vars) : copyText(p.body, el);
-  } else if (act === 'edit') openEdit(p);
-  else if (act === 'fav') { p.fav = !p.fav; p.updated = Date.now(); commit('save', { item: p }); }
+  } else if (act === 'edit') kind === 'links' ? openLink(p) : openEdit(p);
+  else if (act === 'fav') { p.fav = !p.fav; p.updated = Date.now(); commit(kind, 'save', { item: p }); }
   else if (act === 'toggle') el.classList.toggle('open');
 };
 $('tags').onclick = e => {
@@ -529,14 +692,20 @@ document.querySelectorAll('.modal-bg').forEach(bg =>
   bg.addEventListener('mousedown', e => { if (e.target === bg) bg.classList.remove('show'); }));
 document.addEventListener('keydown', e => {
   const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-  if (e.key === 'Escape') { closeEdit(); closeFill(); closeConn(); if (typing) document.activeElement.blur(); }
+  if (e.key === 'Escape') { closeEdit(); closeLink(); closeFill(); closeConn(); if (typing) document.activeElement.blur(); }
   if (e.key === '/' && !typing) { e.preventDefault(); $('search').focus(); }
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && $('editModal').classList.contains('show')) $('saveBtn').click();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    if ($('editModal').classList.contains('show')) $('saveBtn').click();
+    if ($('linkModal').classList.contains('show')) $('lSaveBtn').click();
+  }
+});
+$('linkModal').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing && e.target.tagName === 'INPUT') $('lSaveBtn').click();
 });
 
 // 백업 / 불러오기
 $('exportBtn').onclick = () => {
-  const blob = new Blob([JSON.stringify(prompts, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `prompt-box-${new Date().toISOString().slice(0, 10)}.json`;
@@ -546,13 +715,20 @@ $('importBtn').onclick = () => $('importFile').click();
 $('importFile').onchange = async e => {
   const file = e.target.files[0]; if (!file) return;
   try {
-    const data = JSON.parse(await file.text());
-    if (!Array.isArray(data)) throw 0;
-    const ids = new Set(prompts.map(p => p.id));
-    const added = data.filter(p => p && p.id && p.body && !ids.has(p.id))
-      .map(p => ({ fav: false, tags: [], source: '', memo: '', title: '', updated: Date.now(), ...p }));
-    prompts.push(...added); commit('bulk', { items: added });
-    toast(`${added.length}개 불러왔어요`);
+    const json = JSON.parse(await file.text());
+    const src = Array.isArray(json) ? { prompts: json } : json; // 예전 백업은 프롬프트 배열
+    let total = 0;
+    for (const kind of ['prompts', 'links']) {
+      if (!Array.isArray(src[kind])) continue;
+      const main = kind === 'links' ? 'url' : 'body';
+      const ids = new Set(data[kind].map(p => p.id));
+      const added = src[kind].filter(p => p && p.id && p[main] && !ids.has(p.id))
+        .map(p => ({ fav: false, tags: [], memo: '', title: '', updated: Date.now(), ...(kind === 'prompts' ? { source: '' } : {}), ...p }));
+      if (!added.length) continue;
+      data[kind].push(...added); total += added.length;
+      commit(kind, 'bulk', { items: added });
+    }
+    toast(`${total}개 불러왔어요`);
   } catch { toast('파일을 읽을 수 없어요'); }
   e.target.value = '';
 };
@@ -575,12 +751,14 @@ async function connect(conn) {
   const btn = $('connSave'); btn.disabled = true; btn.textContent = '확인 중…';
   setSync('busy', '연결 중…');
   try {
-    const { items } = await api('list', {}, conn);
-    if (!items.length && prompts.length &&
-        confirm(`시트가 비어 있어요. 이 브라우저에 있는 ${prompts.length}개를 시트로 올릴까요?`)) {
-      await api('bulk', { items: prompts }, conn);
+    const sheet = await api('all', {}, conn);
+    const localCount = data.prompts.length + data.links.length;
+    if (!sheet.prompts.length && !sheet.links.length && localCount &&
+        confirm(`시트가 비어 있어요. 이 브라우저에 있는 ${localCount}개를 시트로 올릴까요?`)) {
+      await api('bulk', { kind: 'prompts', items: data.prompts }, conn);
+      await api('bulk', { kind: 'links', items: data.links }, conn);
     } else {
-      prompts = items;
+      data = { prompts: sheet.prompts, links: sheet.links };
     }
     remote = conn;
     try { localStorage.setItem(REMOTE_KEY, JSON.stringify(conn)); } catch {}
@@ -594,6 +772,11 @@ async function connect(conn) {
   }
 }
 $('connSave').onclick = () => connect({ url: $('cUrl').value.trim(), token: $('cToken').value.trim() });
+$('disconnectBtn').onclick = () => {
+  if (!confirm('연결을 해제할까요? 시트의 데이터는 그대로 남아요.')) return;
+  remote = null; localStorage.removeItem(REMOTE_KEY);
+  idleSync(); closeConn(); toast('연결을 해제했어요');
+};
 
 // 연결 링크: 주소 뒤 #connect=... 에 URL·토큰을 담는다 (# 뒤는 서버로 전송되지 않음)
 $('copyLinkBtn').onclick = () => {
@@ -609,11 +792,6 @@ function connectFromLink() {
   connect(conn);
   return true;
 }
-$('disconnectBtn').onclick = () => {
-  if (!confirm('연결을 해제할까요? 시트의 데이터는 그대로 남아요.')) return;
-  remote = null; localStorage.removeItem(REMOTE_KEY);
-  idleSync(); closeConn(); toast('연결을 해제했어요');
-};
 
 // 다른 기기에서 바꾼 내용 반영: 탭으로 돌아올 때 + 1분마다
 document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
